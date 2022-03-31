@@ -129,11 +129,11 @@ parser.add_argument('--weight-percentile',
                          '(0 means no percentile, 99.9 means cut off 0.1%)')
 parser.add_argument('--channel-wise',
                     action='store_false',
-                    help='whether to use channel-wise quantizaiton or not')
+                    help='whether to use channel-wise quantization or not')
 parser.add_argument('--bias-bit',
                     type=int,
                     default=32,
-                    help='quantizaiton bit-width for bias')
+                    help='quantization bit-width for bias')
 parser.add_argument('--distill-method',
                     type=str,
                     default='None',
@@ -150,6 +150,9 @@ parser.add_argument('--fixed-point-quantization',
                     action='store_true',
                     help='whether to skip deployment-oriented operations and '
                          'use fixed-point rather than integer-only quantization')
+parser.add_argument('--debug-break',
+                    action='store_true',
+                    help='Gavin: set to perform only 1 iteration for both train and validation')
 
 best_acc1 = 0
 quantize_arch_dict = {'resnet50': q_resnet50, 'resnet50b': q_resnet50,
@@ -366,6 +369,9 @@ def main_worker(gpu, ngpus_per_node, args):
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
+    # optimizer = torch.optim.Adam(model.parameters(), args.lr,
+    #                              weight_decay=args.weight_decay)
+
     # optionally resume optimizer and meta information from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -462,7 +468,7 @@ def main_worker(gpu, ngpus_per_node, args):
         is_best = acc1 > best_acc1
         best_acc1 = max(acc1, best_acc1)
 
-        logging.info(f'Best acc at epoch {epoch}: {best_acc1}')
+        logging.info(f'Best acc at epoch {epoch}: {best_acc1} @ epoch {best_epoch}')
         if is_best:
             # record the best epoch
             best_epoch = epoch
@@ -528,6 +534,10 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
         if i % args.print_freq == 0:
             progress.display(i)
+
+        # TODO: GAVIN: this is for debugging only
+        if args.debug_break:
+            break
 
 
 def train_kd(train_loader, model, teacher, criterion, optimizer, epoch, val_loader, args, ngpus_per_node,
@@ -660,6 +670,10 @@ def validate(val_loader, model, criterion, args):
             if i % args.print_freq == 0:
                 progress.display(i)
 
+            # TODO: GAVIN: this is for debugging only
+            if args.debug_break:
+                break
+
         logging.info(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
 
     torch.save({'convbn_scaling_factor': {k: v for k, v in model.state_dict().items() if 'convbn_scaling_factor' in k},
@@ -667,7 +681,7 @@ def validate(val_loader, model, criterion, args):
                 'weight_integer': {k: v for k, v in model.state_dict().items() if 'weight_integer' in k},
                 'bias_integer': {k: v for k, v in model.state_dict().items() if 'bias_integer' in k},
                 'act_scaling_factor': {k: v for k, v in model.state_dict().items() if 'act_scaling_factor' in k},
-                }, args.save_path + 'quantized_checkpoint.pth.tar')
+                }, os.path.join(args.save_path, 'quantized_checkpoint.pth.tar'))
 
     unfreeze_model(model)
 
